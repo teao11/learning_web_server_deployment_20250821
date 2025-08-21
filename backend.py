@@ -1,11 +1,15 @@
 import os
 import json
 import base64
+from dotenv import load_dotenv
 from flask import Flask, request, jsonify
-from google.generativeai import GenerativeModel
-from google.generativeai.types import GenerationConfig, Part
+from google import genai
+from google.genai import types
 import firebase_admin
 from firebase_admin import credentials, firestore
+
+# Load environment variables from .env file
+load_dotenv()
 
 # --- Configuration & Setup ---
 
@@ -13,34 +17,29 @@ from firebase_admin import credentials, firestore
 # but for this example, we'll use a placeholder.
 # In a production environment, you would never hardcode this.
 # You could set it using `export API_KEY='your-key-here'` in your server's shell.
-API_KEY = os.environ.get("API_KEY", "")
-
-# This is a placeholder for your Firebase service account key file.
-# You will need to download this JSON file from your Firebase project settings
-# and place it in your project's root directory on the server.
-# In production, you would use a more secure method like Google Cloud's Secret Manager.
-SERVICE_ACCOUNT_KEY_PATH = "path/to/your/service-account-key.json"
+gemini_api_key = os.environ.get("GOOGLE_API_KEY")
 
 # --- Firebase Admin SDK Initialization ---
 # The Admin SDK allows the backend to securely access Firestore.
 try:
     if not firebase_admin._apps:
-        # Load the service account credentials from the JSON file.
-        cred = credentials.Certificate(SERVICE_ACCOUNT_KEY_PATH)
-        # Initialize the Firebase app.
+        # Use Application Default Credentials (ADC) to authenticate.
+        # This will automatically use the service account assigned to the GCE instance.
+        # No key file is needed on the VM. This is a secure, production-ready method.
+        cred = credentials.ApplicationDefault()
         firebase_admin.initialize_app(cred)
     
     # Get a reference to the Firestore database client.
     db = firestore.client()
-    print("Firebase Admin SDK initialized successfully.")
+    print("Firebase Admin SDK initialized successfully using keyless authentication.")
 except Exception as e:
     print(f"Error initializing Firebase Admin SDK: {e}")
     db = None
 
 # --- Gemini API Configuration ---
 # Use the Gemini API client. The API key is loaded from the environment.
-# Note: You would need to `pip install -q -U google-generativeai` on your server.
-model = GenerativeModel("gemini-1.5-pro")
+GEMINI_MODEL="gemini-2.0-flash"
+client = genai.Client(api_key=gemini_api_key)
 
 # --- Flask Server Setup ---
 app = Flask(__name__)
@@ -86,14 +85,21 @@ def parse_receipt():
     )
 
     # Combine the text prompt with the image data for a multimodal request.
-    prompt_parts = [
-        Part(text=prompt_text),
-        Part(inline_data={'mime_type': 'image/jpeg', 'data': base64_image})
-    ]
+    prompt_parts = [{
+        "text": prompt_text,
+        "inline_data": {'mime_type': 'image/jpeg', 'data': base64_image}
+    }]
 
     # --- Call the Gemini API ---
     try:
-        response = model.generate_content(prompt_parts)
+        response = client.models.generate_content(
+            model=GEMINI_MODEL,
+            parts=prompt_parts,
+            generation_config=types.GenerationConfig(
+                temperature=0.2  # Adjust the creativity level
+            )
+        )
+    
         parsed_data = json.loads(response.text)
         return jsonify(parsed_data), 200
     except json.JSONDecodeError as e:

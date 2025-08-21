@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GCP Grocery Manager</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module" src="https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js"></script>
+    <script type="module" src="https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js"></script>
+    <script type="module" src="https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6;
+        }
+        .container {
+            max-width: 900px;
+            margin: auto;
+        }
+        .table-cell-input {
+            background-color: transparent;
+            border: none;
+            outline: none;
+            width: 100%;
+            height: 100%;
+            padding: 8px;
+            box-sizing: border-box;
+        }
+        .editable-cell:hover {
+            background-color: #f9fafb;
+            cursor: text;
+        }
+        .editable-cell:focus-within {
+            outline: 2px solid #3b82f6;
+            outline-offset: -2px;
+        }
+        /* Page content is initially hidden and controlled by JS */
+        .page-content { display: none; }
+        .page-content.active { display: block; }
+    </style>
+</head>
+<body class="bg-gray-100 flex items-center justify-center min-h-screen p-4">
+
+    <!-- Main Application Container -->
+    <div class="container bg-white rounded-2xl shadow-xl p-8 space-y-8">
+        
+        <!-- Navigation Bar -->
+        <nav class="flex justify-between items-center mb-6 border-b border-gray-200 pb-4">
+            <h1 class="text-xl md:text-2xl font-bold text-gray-800">Grocery Manager</h1>
+            <ul class="flex space-x-4">
+                <li><button id="nav-home" class="text-gray-600 hover:text-blue-600 font-medium">Home</button></li>
+                <li><button id="nav-parser" class="text-gray-600 hover:text-blue-600 font-medium">Parser</button></li>
+                <li><button id="nav-storage" class="text-gray-600 hover:text-blue-600 font-medium">Storage</button></li>
+            </ul>
+        </nav>
+        
+        <!-- User ID Display -->
+        <div id="user-id-display" class="text-sm text-gray-500 text-center mb-4 hidden">
+            User ID: <span id="user-id-value" class="font-mono bg-gray-200 p-1 rounded-md"></span>
+        </div>
+
+        <!-- Chat Page -->
+        <div id="home-page" class="page-content space-y-6 active">
+            <header class="text-center">
+                <h2 class="text-3xl font-bold text-gray-800">Chat with Gemini (Simulated)</h2>
+                <p class="mt-2 text-gray-600">Ask about groceries, recipes, or anything else!</p>
+            </header>
+            <div id="chat-box" class="h-96 overflow-y-auto p-4 border rounded-xl bg-gray-50 space-y-4">
+                <!-- Chat messages will be appended here -->
+                <div class="flex justify-start">
+                    <div class="bg-blue-100 p-3 rounded-xl max-w-[75%]">
+                        <p class="text-sm text-gray-700">Hi there! How can I help you with your groceries today?</p>
+                    </div>
+                </div>
+            </div>
+            <div class="flex space-x-2">
+                <input type="text" id="chat-input" placeholder="Type your message..." class="flex-grow p-3 rounded-full border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500"/>
+                <button id="chat-send" class="p-3 bg-blue-600 text-white rounded-full hover:bg-blue-700 transition">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/>
+                    </svg>
+                </button>
+            </div>
+            
+            <!-- Message Box for UI feedback -->
+            <div id="chat-message-box" class="hidden text-center p-3 bg-gray-50 rounded-xl shadow-lg mt-4">
+                <p id="chat-message-text" class="text-gray-700"></p>
+            </div>
+        </div>
+
+        <!-- Receipt Parser Page -->
+        <div id="parser-page" class="page-content space-y-8">
+            <header class="text-center">
+                <h2 class="text-3xl font-bold text-gray-800">Receipt Parser</h2>
+                <p class="mt-2 text-gray-600">Upload a receipt and let Gemini parse your items.</p>
+            </header>
+            
+            <!-- File Upload Section -->
+            <div class="space-y-4 p-6 border-2 border-dashed border-gray-300 rounded-xl text-center transition-colors duration-200">
+                <label for="receipt-file" class="block text-xl font-medium text-gray-700">Upload a Receipt Image</label>
+                <p class="text-sm text-gray-500">Supported formats: JPG, PNG</p>
+                <input type="file" id="receipt-file" accept="image/png, image/jpeg" class="w-full text-gray-600 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-violet-50 file:text-violet-700 hover:file:bg-violet-100 cursor-pointer"/>
+                <button id="parse-button" class="w-full md:w-auto px-6 py-3 bg-blue-600 text-white font-semibold rounded-full shadow-lg hover:bg-blue-700 transition transform hover:scale-105 duration-200">
+                    Parse with Gemini (Simulated)
+                </button>
+            </div>
+
+            <!-- Loading Indicator -->
+            <div id="loading-indicator" class="hidden text-center text-gray-500 text-lg">
+                <div class="animate-spin inline-block h-8 w-8 border-4 border-t-blue-500 border-gray-200 rounded-full"></div>
+                <p class="mt-2">Processing receipt...</p>
+            </div>
+
+            <!-- Results Table Section -->
+            <div id="results-section" class="hidden">
+                <h2 class="text-2xl font-bold text-gray-800 text-center mb-4">Parsed Items</h2>
+                <div class="overflow-x-auto rounded-xl shadow-lg">
+                    <table id="receipt-table" class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Receipt Name</th>
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Human Name</th>
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Quantity</th>
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Cost</th>
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Use By Date</th>
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Storage</th>
+                            </tr>
+                        </thead>
+                        <tbody class="bg-white divide-y divide-gray-200">
+                            <!-- Table rows will be inserted here by JavaScript -->
+                        </tbody>
+                    </table>
+                </div>
+                
+                <div class="mt-6 flex justify-center">
+                    <button id="confirm-button" class="px-8 py-4 bg-green-600 text-white font-semibold rounded-full shadow-lg hover:bg-green-700 transition transform hover:scale-105 duration-200">
+                        Confirm & Save to Cloud DB
+                    </button>
+                </div>
+            </div>
+
+            <!-- Error Message for Parser -->
+            <div id="parser-error-message" class="hidden text-center p-6 bg-red-50 rounded-xl shadow-lg">
+                <p class="text-red-800 font-semibold text-xl">Error!</p>
+                <p id="parser-error-text" class="mt-2 text-red-600"></p>
+            </div>
+        </div>
+
+        <!-- Storage Page -->
+        <div id="storage-page" class="page-content space-y-6">
+            <header class="text-center">
+                <h2 class="text-3xl font-bold text-gray-800">My Stored Items</h2>
+                <p class="mt-2 text-gray-600">View your grocery items, categorized by storage location.</p>
+            </header>
+            
+            <div id="storage-content" class="space-y-6">
+                <!-- Storage categories will be rendered here by JavaScript -->
+            </div>
+            
+            <!-- Loading Indicator for Storage Page -->
+            <div id="storage-loading-indicator" class="text-center text-gray-500 text-lg hidden">
+                <div class="animate-spin inline-block h-8 w-8 border-4 border-t-blue-500 border-gray-200 rounded-full"></div>
+                <p class="mt-2">Loading saved items...</p>
+            </div>
+        </div>
+
+        <!-- Universal Message Box for UI feedback -->
+        <div id="global-message-box" class="hidden text-center p-6 rounded-xl shadow-lg">
+            <p id="global-message-text" class="font-semibold text-xl"></p>
+        </div>
+
+    </div>
+
+    <script type="module">
+        // Import necessary Firebase modules. This is the modern way to get Firebase on a website.
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, onSnapshot, collection, query } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // --- GLOBAL VARIABLES & CONFIGURATION ---
+        // These variables are provided by the canvas environment to securely connect to Firebase.
+        // We use 'default-app-id' as a fallback in case the environment variable isn't set.
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+        
+        // Firebase service instances. These will be initialized after the page loads.
+        let app, db, auth;
+        let userId = null;
+        let isAuthReady = false;
+
+        // --- UI ELEMENT REFERENCES ---
+        // We get references to all the important HTML elements to manipulate them with JavaScript.
+        const pageElements = {
+            home: document.getElementById('home-page'),
+            parser: document.getElementById('parser-page'),
+            storage: document.getElementById('storage-page')
+        };
+        const navButtons = {
+            home: document.getElementById('nav-home'),
+            parser: document.getElementById('nav-parser'),
+            storage: document.getElementById('nav-storage')
+        };
+
+        const receiptFile = document.getElementById('receipt-file');
+        const parseButton = document.getElementById('parse-button');
+        const confirmButton = document.getElementById('confirm-button');
+        const loadingIndicator = document.getElementById('loading-indicator');
+        const resultsSection = document.getElementById('results-section');
+        const receiptTableBody = document.querySelector('#receipt-table tbody');
+        const parserErrorMessage = document.getElementById('parser-error-message');
+        const parserErrorText = document.getElementById('parser-error-text');
+        
+        const storageContent = document.getElementById('storage-content');
+        const storageLoadingIndicator = document.getElementById('storage-loading-indicator');
+        const userIdDisplay = document.getElementById('user-id-display');
+        const userIdValue = document.getElementById('user-id-value');
+
+        const chatBox = document.getElementById('chat-box');
+        const chatInput = document.getElementById('chat-input');
+        const chatSend = document.getElementById('chat-send');
+        const chatMessageBox = document.getElementById('chat-message-box');
+        const chatMessageText = document.getElementById('chat-message-text');
+
+        // --- CORE APPLICATION FUNCTIONS ---
+
+        /**
+         * Initializes Firebase and handles user authentication.
+         * This function is the first thing that runs after the page loads.
+         * It sets up the Firebase app, gets the authentication and database services,
+         * and then listens for the user's authentication state. This is a critical
+         * step to ensure we have a valid user ID before attempting to save or retrieve data.
+         */
+        const initializeFirebase = async () => {
+            try {
+                // Initialize the Firebase app with the provided configuration.
+                app = initializeApp(firebaseConfig);
+                // Get the Firestore database service.
+                db = getFirestore(app);
+                // Get the authentication service.
+                auth = getAuth(app);
+
+                // Set up a listener for authentication state changes.
+                // This is the most reliable way to know when a user is authenticated.
+                onAuthStateChanged(auth, async (user) => {
+                    if (user) {
+                        // If a user is logged in, we get their unique ID.
+                        userId = user.uid;
+                        userIdDisplay.classList.remove('hidden');
+                        userIdValue.textContent = userId;
+                        // Mark authentication as ready.
+                        isAuthReady = true;
+                        console.log("Firebase initialized. User authenticated with ID:", userId);
+                        // Once authenticated, we can start listening for data on the storage page.
+                        startStorageDataListener();
+                    } else {
+                        // If no user is found, sign in anonymously.
+                        // This gives every user a unique ID without requiring a login.
+                        await signInAnonymously(auth);
+                        console.log("Signed in anonymously.");
+                    }
+                });
+
+                // Attempt to sign in using a custom token if one is provided.
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                }
+                
+            } catch (error) {
+                // Log any errors that occur during initialization or authentication.
+                console.error("Error initializing Firebase or authenticating:", error);
+                // Display a user-friendly message.
+                showMessage('An error occurred with Firebase authentication. Check the console for details.', 'red');
+            }
+        };
+
+        /**
+         * Manages page navigation.
+         * This function hides all page sections and then displays only the requested one.
+         * This approach creates a "Single-Page Application" feel, where the URL doesn't change,
+         * but the content does.
+         * @param {string} pageId The ID of the page to show ('home', 'parser', 'storage').
+         */
+        const navigateTo = (pageId) => {
+            // Hide all pages by removing the 'active' class.
+            Object.values(pageElements).forEach(el => el.classList.remove('active'));
+            // Show the selected page by adding the 'active' class.
+            pageElements[pageId].classList.add('active');
+            
+            // Reload storage data whenever the user navigates to the storage page.
+            if (pageId === 'storage' && isAuthReady) {
+                startStorageDataListener();
+            }
+        };
+
+        /**
+         * Displays a temporary message box for user feedback (e.g., success, error).
+         * @param {string} message The message to display.
+         * @param {string} type The message type ('green' for success, 'red' for error).
+         */
+        const showMessage = (message, type) => {
+            const messageBox = document.getElementById('global-message-box');
+            const messageText = document.getElementById('global-message-text');
+            
+            // Set the message text and background color based on the type.
+            messageBox.classList.remove('hidden', 'bg-red-50', 'bg-green-50');
+            messageBox.classList.add(`bg-${type}-50`);
+            messageText.textContent = message;
+            
+            // Automatically hide the message after 5 seconds.
+            setTimeout(() => messageBox.classList.add('hidden'), 5000);
+        };
+
+        // --- CHAT PAGE LOGIC ---
+        
+        // This is a placeholder for a real API key.
+        const apiKey = "";
+        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
+
+        // Store the chat history to provide context for the Gemini model.
+        let chatHistory = [{ role: "model", parts: [{ text: "Hi there! How can I help you with your groceries today?" }] }];
+        
+        /**
+         * Appends a new message bubble to the chat box.
+         * @param {string} text The message text.
+         * @param {string} sender The sender ('user' or 'model').
+         */
+        const appendMessageToChat = (text, sender) => {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `flex ${sender === 'user' ? 'justify-end' : 'justify-start'}`;
+            const bubbleDiv = document.createElement('div');
+            bubbleDiv.className = `p-3 rounded-xl max-w-[75%] text-sm ${sender === 'user' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-800'}`;
+            bubbleDiv.textContent = text;
+            messageDiv.appendChild(bubbleDiv);
+            chatBox.appendChild(messageDiv);
+            // Scroll to the bottom to show the newest message.
+            chatBox.scrollTop = chatBox.scrollHeight;
+        };
+        
+        /**
+         * Handles sending a message and calling the Gemini API.
+         * This function simulates a call to the Gemini API, which would be managed
+         * on the backend in a real application.
+         */
+        const handleChatSend = async () => {
+            const prompt = chatInput.value.trim();
+            if (prompt === "") return;
+            
+            appendMessageToChat(prompt, 'user');
+            chatInput.value = "";
+            chatHistory.push({ role: "user", parts: [{ text: prompt }] });
+            
+            chatSend.disabled = true;
+
+            const payload = { contents: chatHistory };
+
+            try {
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`API call failed: ${response.status} ${response.statusText}`);
+                }
+                
+                const result = await response.json();
+                const responseText = result?.candidates?.[0]?.content?.parts?.[0]?.text;
+                
+                if (responseText) {
+                    appendMessageToChat(responseText, 'model');
+                    chatHistory.push({ role: "model", parts: [{ text: responseText }] });
+                } else {
+                    appendMessageToChat("Sorry, I couldn't generate a response. Please try again.", 'model');
+                }
+            } catch (error) {
+                console.error("Error with Gemini API call:", error);
+                appendMessageToChat("Error: Could not connect to the chat service. Check the console for details.", 'model');
+            } finally {
+                chatSend.disabled = false;
+            }
+        };
+
+        // --- PARSER PAGE LOGIC ---
+
+        // The URL for our new backend API endpoint.
+        // In a deployed application, this would be your GCE instance's public IP address.
+        const BACKEND_URL = "http://localhost:5000";
+
+        /**
+         * Sends the receipt image to the backend for parsing.
+         * This function uses the native browser Fetch API to make a POST request
+         * to the `/parse-receipt` endpoint on your Flask server.
+         * It sends the image file as `FormData`, which is the standard way to handle
+         * file uploads in web applications.
+         */
+        const sendReceiptToBackend = async (imageFile) => {
+            const formData = new FormData();
+            formData.append('image', imageFile);
+
+            const response = await fetch(`${BACKEND_URL}/parse-receipt`, {
+                method: 'POST',
+                body: formData
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.error || "Failed to parse receipt from backend.");
+            }
+
+            return await response.json();
+        };
+
+        /**
+         * Renders the parsed data into an HTML table.
+         * This function takes the JSON array of grocery items returned from the backend
+         * and dynamically creates HTML table rows and cells, making them editable.
+         */
+        
+        const renderTable = (data) => {
+            receiptTableBody.innerHTML = '';
+            data.forEach(item => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 editable-cell">
+                        <input type="text" value="${item.receiptName}" class="table-cell-input" data-field="receiptName" />
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 editable-cell">
+                        <input type="text" value="${item.humanName}" class="table-cell-input" data-field="humanName" />
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 editable-cell">
+                        <input type="text" value="${item.quantity}" class="table-cell-input" data-field="quantity" />
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 editable-cell">
+                        <input type="text" value="${item.cost}" class="table-cell-input" data-field="cost" />
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 editable-cell">
+                        <input type="text" value="${item.useByDate}" class="table-cell-input" data-field="useByDate" />
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 editable-cell">
+                        <input type="text" value="${item.storage}" class="table-cell-input" data-field="storage" />
+                    </td>
+                `;
+                receiptTableBody.appendChild(row);
+            });
+        };
+
+        // --- STORAGE PAGE LOGIC (FIRESTORE INTEGRATION) ---
+
+        /**
+         * Sets up a real-time listener for Firestore data.
+         * The `onSnapshot` function is a powerful feature of Firestore that
+         * automatically listens for changes to a collection. Whenever data is
+         * added, modified, or deleted, this callback function is triggered,
+         * keeping the UI in sync with the database in real-time.
+         */
+        const startStorageDataListener = () => {
+            if (!isAuthReady) return;
+
+            storageLoadingIndicator.classList.remove('hidden');
+
+            // Construct the path to the user's private collection.
+            const groceriesCollectionRef = collection(db, `artifacts/${appId}/users/${userId}/groceries`);
+            const q = query(groceriesCollectionRef);
+
+            // Set up the real-time listener.
+            onSnapshot(q, (querySnapshot) => {
+                const storedItems = [];
+                querySnapshot.forEach((doc) => {
+                    storedItems.push({ id: doc.id, ...doc.data() });
+                });
+                renderStoragePage(storedItems);
+                storageLoadingIndicator.classList.add('hidden');
+            }, (error) => {
+                console.error("Error getting Firestore data:", error);
+                showMessage('Failed to load storage data. Please try again.', 'red');
+                storageLoadingIndicator.classList.add('hidden');
+            });
+        };
+        
+        /**
+         * Renders the items on the storage page, grouped by storage type.
+         * It takes the array of grocery items and dynamically creates sections
+         * for each storage location (e.g., Fridge, Freezer) and lists the items within.
+         */
+        const renderStoragePage = (items) => {
+            storageContent.innerHTML = '';
+            
+            if (items.length === 0) {
+                storageContent.innerHTML = `<p class="text-center text-gray-500">No items saved yet. Head to the Parser to add some!</p>`;
+                return;
+            }
+
+            // Group the items by their 'storage' property using a reducer.
+            const groupedItems = items.reduce((acc, item) => {
+                const key = item.storage || 'Uncategorized';
+                if (!acc[key]) {
+                    acc[key] = [];
+                }
+                acc[key].push(item);
+                return acc;
+            }, {});
+
+            // Loop through the grouped items and create a section for each group.
+            for (const storageType in groupedItems) {
+                const groupDiv = document.createElement('div');
+                groupDiv.className = 'bg-gray-50 rounded-xl p-4 shadow-sm space-y-2';
+                groupDiv.innerHTML = `<h3 class="text-xl font-bold text-gray-700">${storageType}</h3>`;
+
+                const list = document.createElement('ul');
+                list.className = 'list-disc list-inside space-y-1 text-gray-600';
+
+                groupedItems[storageType].forEach(item => {
+                    const listItem = document.createElement('li');
+                    listItem.textContent = `${item.humanName} (${item.quantity} units, Cost: $${item.cost})`;
+                    list.appendChild(listItem);
+                });
+
+                groupDiv.appendChild(list);
+                storageContent.appendChild(groupDiv);
+            }
+        };
+        
+        /**
+         * Sends the edited grocery items to the backend for saving to Firestore.
+         * This function makes a POST request with the final JSON data to the
+         * `/save-items` endpoint on your Flask server. It also includes the user ID
+         * in a custom header so the backend knows where to save the data in Firestore.
+         */
+        const saveItemsToFirestore = async (items) => {
+            if (!userId) {
+                showMessage('User is not authenticated. Cannot save data.', 'red');
+                return;
+            }
+            
+            const response = await fetch(`${BACKEND_URL}/save-items`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-User-ID': userId 
+                },
+                body: JSON.stringify(items)
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.error || "Failed to save data to backend.");
+            }
+
+            return await response.json();
+        };
+        
+        // --- EVENT LISTENERS AND INITIALIZATION ---
+        
+        // Ensure all JavaScript runs only after the full HTML document has loaded.
+        document.addEventListener('DOMContentLoaded', () => {
+            // Start the entire application by initializing Firebase.
+            initializeFirebase();
+
+            // Set up navigation button event listeners.
+            navButtons.home.addEventListener('click', () => navigateTo('home'));
+            navButtons.parser.addEventListener('click', () => navigateTo('parser'));
+            navButtons.storage.addEventListener('click', () => navigateTo('storage'));
+
+            // Event listener for the "Parse" button on the Parser page.
+            parseButton.addEventListener('click', async () => {
+                const file = receiptFile.files[0];
+                if (!file) {
+                    parserErrorMessage.classList.remove('hidden');
+                    parserErrorText.textContent = "Please select a receipt image to upload.";
+                    return;
+                }
+
+                document.querySelectorAll('#parser-page .hidden').forEach(el => el.classList.add('hidden'));
+                loadingIndicator.classList.remove('hidden');
+
+                try {
+                    // Call the function that sends the image to our backend.
+                    const data = await sendReceiptToBackend(file);
+                    // Render the table with the data received from the backend.
+                    renderTable(data);
+
+                    loadingIndicator.classList.add('hidden');
+                    resultsSection.classList.remove('hidden');
+
+                } catch (error) {
+                    console.error("Error parsing receipt:", error);
+                    loadingIndicator.classList.add('hidden');
+                    parserErrorMessage.classList.remove('hidden');
+                    parserErrorText.textContent = `An error occurred: ${error.message}`;
+                }
+            });
+
+            // Event listener for the "Confirm" button to save data.
+            confirmButton.addEventListener('click', async () => {
+                document.querySelectorAll('#parser-page .hidden').forEach(el => el.classList.add('hidden'));
+                loadingIndicator.classList.remove('hidden');
+
+                // Get the latest data from the editable table.
+                const tableData = Array.from(receiptTableBody.querySelectorAll('tr')).map(row => {
+                    const inputs = row.querySelectorAll('.table-cell-input');
+                    const item = {};
+                    inputs.forEach(input => {
+                        item[input.getAttribute('data-field')] = input.value;
+                    });
+                    // Ensure quantity and cost are saved as numbers.
+                    item.quantity = parseFloat(item.quantity) || 0;
+                    item.cost = parseFloat(item.cost) || 0;
+                    return item;
+                });
+
+                try {
+                    // Call the function that saves the data via the backend.
+                    await saveItemsToFirestore(tableData);
+                    loadingIndicator.classList.add('hidden');
+                    showMessage("Data successfully saved to Firestore!", 'green');
+                    
+                    // Navigate to the storage page to show the newly saved data.
+                    navigateTo('storage');
+                } catch (error) {
+                    console.error("Error saving data:", error);
+                    loadingIndicator.classList.add('hidden');
+                    showMessage(`An error occurred while saving: ${error.message}`, 'red');
+                }
+            });
+            
+            // Chat page event listeners for sending messages.
+            chatSend.addEventListener('click', handleChatSend);
+            chatInput.addEventListener('keypress', (event) => {
+                if (event.key === 'Enter') {
+                    handleChatSend();
+                }
+            });
+        });
+    </script>
+</body>
+</html>
